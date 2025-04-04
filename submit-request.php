@@ -1,5 +1,187 @@
 <?php
-  require('database.php');
+// Database connection parameters
+$servername = "localhost";
+$username = "root";
+$password = "";
+$dbname = "aqua_connect";
+
+// Create connection with error handling
+try {
+    $conn = new mysqli($servername, $username, $password, $dbname);
+    
+    // Check connection
+    if ($conn->connect_error) {
+        throw new Exception("Connection failed: " . $conn->connect_error);
+    }
+    
+    // Set charset to utf8mb4 for proper encoding
+    $conn->set_charset("utf8mb4");
+
+    // Process form submission
+    if ($_SERVER["REQUEST_METHOD"] == "POST") {
+        // Initialize response array
+        $response = array();
+        
+        // Validate required fields
+        $required = ['name', 'email', 'phone', 'address', 'issue', 'urgency', 'description'];
+        $missing = array();
+        foreach ($required as $field) {
+            if (empty($_POST[$field])) {
+                $missing[] = $field;
+            }
+        }
+        
+        if (!empty($missing)) {
+            $response = array(
+                'status' => 'error',
+                'message' => 'Missing required fields: ' . implode(', ', $missing)
+            );
+            echo json_encode($response);
+            exit;
+        }
+        
+        // Get form data and sanitize inputs
+        $name = $conn->real_escape_string(htmlspecialchars(trim($_POST['name'])));
+        $email = $conn->real_escape_string(filter_var(trim($_POST['email']), FILTER_SANITIZE_EMAIL));
+        $phone = $conn->real_escape_string(htmlspecialchars(trim($_POST['phone'])));
+        $address = $conn->real_escape_string(htmlspecialchars(trim($_POST['address'])));
+        $issue = $conn->real_escape_string(htmlspecialchars(trim($_POST['issue'])));
+        $urgency = $conn->real_escape_string(htmlspecialchars(trim($_POST['urgency'])));
+        $description = $conn->real_escape_string(htmlspecialchars(trim($_POST['description'])));
+        $photo_path = NULL;
+        
+        // Validate email format
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $response = array(
+                'status' => 'error',
+                'message' => 'Invalid email format'
+            );
+            echo json_encode($response);
+            exit;
+        }
+        
+        // Handle file upload if present
+        if(isset($_FILES['attachment']) && $_FILES['attachment']['error'] == UPLOAD_ERR_OK) {
+            $allowed = ['jpg', 'jpeg', 'png', 'gif'];
+            $filename = $_FILES['attachment']['name'];
+            $filetype = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            $filesize = $_FILES['attachment']['size'];
+            $tmp_name = $_FILES['attachment']['tmp_name'];
+            
+            // Verify file extension
+            if(!in_array($filetype, $allowed)) {
+                $response = array(
+                    'status' => 'error',
+                    'message' => 'Only JPG, JPEG, PNG & GIF files are allowed'
+                );
+                echo json_encode($response);
+                exit;
+            }
+            
+            // Check file size (5MB max)
+            $max_size = 5 * 1024 * 1024; // 5MB
+            if($filesize > $max_size) {
+                $response = array(
+                    'status' => 'error',
+                    'message' => 'File size must be less than 5MB'
+                );
+                echo json_encode($response);
+                exit;
+            }
+            
+            // Create upload directory if it doesn't exist
+            $upload_dir = 'uploads/';
+            if (!file_exists($upload_dir)) {
+                mkdir($upload_dir, 0755, true);
+            }
+            
+            // Generate unique filename and set path
+            $new_filename = uniqid('img_', true) . '.' . $filetype;
+            $upload_path = $upload_dir . $new_filename;
+            
+            // Verify file is actually an image
+            $check = getimagesize($tmp_name);
+            if($check === false) {
+                $response = array(
+                    'status' => 'error',
+                    'message' => 'File is not an image'
+                );
+                echo json_encode($response);
+                exit;
+            }
+            
+            // Upload file
+            if(move_uploaded_file($tmp_name, $upload_path)) {
+                $photo_path = $upload_path;
+            } else {
+                $response = array(
+                    'status' => 'error',
+                    'message' => 'There was an error uploading your file'
+                );
+                echo json_encode($response);
+                exit;
+            }
+        }
+        
+        // Prepare SQL statement with error handling
+        $stmt = $conn->prepare("INSERT INTO service_requests 
+            (name, email, phone, service_address, issue_type, urgency_level, description, photo_path, created_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())");
+        
+        if (!$stmt) {
+            throw new Exception("Prepare failed: " . $conn->error);
+        }
+        
+        // Bind parameters
+        $bind_result = $stmt->bind_param("ssssssss", $name, $email, $phone, $address, $issue, $urgency, $description, $photo_path);
+        
+        if (!$bind_result) {
+            throw new Exception("Bind failed: " . $stmt->error);
+        }
+        
+        // Execute SQL
+        if($stmt->execute()) {
+            // Get the request ID for reference
+            $request_id = $conn->insert_id;
+            
+            // Log the successful submission (optional)
+            error_log("New service request submitted - ID: $request_id");
+            
+            // Return success response
+            $response = array(
+                'status' => 'success',
+                'message' => 'Your request has been submitted successfully!',
+                'request_id' => $request_id
+            );
+        } else {
+            // Return error response
+            $response = array(
+                'status' => 'error',
+                'message' => 'Database error: ' . $stmt->error
+            );
+        }
+        
+        // Close statement
+        $stmt->close();
+        
+        // Return JSON response
+        header('Content-Type: application/json');
+        echo json_encode($response);
+        
+        // Close connection
+        $conn->close();
+        exit;
+    }
+} catch (Exception $e) {
+    // Handle any exceptions
+    $response = array(
+        'status' => 'error',
+        'message' => 'An error occurred: ' . $e->getMessage()
+    );
+    header('Content-Type: application/json');
+    echo json_encode($response);
+    exit;
+}
 ?>
 
 <!DOCTYPE html>
@@ -325,6 +507,27 @@
       opacity: 0.8;
     }
     
+    /* Success and error message styles */
+    .alert {
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      font-weight: 500;
+      display: none;
+    }
+    
+    .alert-success {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .alert-error {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    
     @media (max-width: 768px) {
       .header-content {
         flex-direction: column;
@@ -416,12 +619,14 @@
       </div>
       
       <div class="form-card">
+        <div id="alert-message" class="alert" style="display: none;"></div>
+        
         <div class="form-header">
           <h2><i class="fas fa-clipboard-list"></i> Request Details</h2>
           <p>Fields marked with an asterisk (*) are required</p>
         </div>
         
-        <form id="requestForm">
+        <form id="requestForm" method="POST" enctype="multipart/form-data">
           <div class="form-group">
             <label for="name">Full Name *</label>
             <input type="text" class="form-control" id="name" name="name" placeholder="Enter your full name" required>
@@ -541,12 +746,60 @@
       });
     });
     
-    // Form submission
+    // Form submission with AJAX
     document.getElementById('requestForm').addEventListener('submit', function(e) {
       e.preventDefault();
-      // Here you would normally handle the form submission via AJAX
-      alert('Your request has been submitted successfully! We will contact you shortly.');
-      this.reset();
+      
+      const form = e.target;
+      const formData = new FormData(form);
+      const alertBox = document.getElementById('alert-message');
+      
+      // Show loading state
+      const submitBtn = form.querySelector('button[type="submit"]');
+      const originalBtnText = submitBtn.innerHTML;
+      submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+      submitBtn.disabled = true;
+      
+      fetch('submit-request.php', {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.status === 'success') {
+          // Show success message
+          alertBox.style.display = 'block';
+          alertBox.className = 'alert alert-success';
+          alertBox.textContent = data.message + ' Your request ID: ' + data.request_id;
+          
+          // Reset form
+          form.reset();
+          
+          // Reset urgency selector to default
+          urgencyOptions.forEach(opt => opt.classList.remove('active'));
+          document.querySelector('.urgency-option[data-value="medium"]').classList.add('active');
+          urgencyInput.value = 'medium';
+        } else {
+          // Show error message
+          alertBox.style.display = 'block';
+          alertBox.className = 'alert alert-error';
+          alertBox.textContent = data.message;
+        }
+      })
+      .catch(error => {
+        // Show error message
+        alertBox.style.display = 'block';
+        alertBox.className = 'alert alert-error';
+        alertBox.textContent = 'An error occurred while submitting your request. Please try again.';
+      })
+      .finally(() => {
+        // Restore button state
+        submitBtn.innerHTML = originalBtnText;
+        submitBtn.disabled = false;
+        
+        // Scroll to alert message
+        alertBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     });
   </script>
 </body>
