@@ -1,5 +1,42 @@
 <?php
-require('contactpagedatabase.php');
+// Database connection configuration
+$host = 'localhost';
+$username = 'root'; // Replace with your database username
+$password = ''; // Replace with your database password
+$database = 'aqua_connect';
+
+// Create connection
+$conn = new mysqli($host, $username, $password, $database);
+
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
+// Process form submission
+$successMessage = '';
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    // Sanitize and validate input data
+    $name = $conn->real_escape_string(trim($_POST['name']));
+    $email = $conn->real_escape_string(trim($_POST['email']));
+    $subject = $conn->real_escape_string(trim($_POST['subject']));
+    $message = $conn->real_escape_string(trim($_POST['message']));
+    
+    // Validate email
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $successMessage = '<div class="error-message">Please enter a valid email address.</div>';
+    } else {
+        // Insert into database
+        $sql = "INSERT INTO contact_messages (name, email, subject, message, created_at) 
+                VALUES ('$name', '$email', '$subject', '$message', NOW())";
+        
+        if ($conn->query($sql) === TRUE) {
+            $successMessage = '<div class="success-message">Your message has been sent successfully! We\'ll get back to you soon.</div>';
+        } else {
+            $successMessage = '<div class="error-message">Error: ' . $conn->error . '</div>';
+        }
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -18,6 +55,7 @@ require('contactpagedatabase.php');
       --light-color: #f8f9fa;
       --gray-color: #6c757d;
       --success-color: #28a745;
+      --error-color: #dc3545;
     }
 
     * {
@@ -289,13 +327,21 @@ require('contactpagedatabase.php');
     }
 
     .success-message {
-      display: none;
       background-color: rgba(40, 167, 69, 0.1);
       color: var(--success-color);
       padding: 1rem;
       border-radius: 6px;
       margin-top: 1rem;
       border-left: 4px solid var(--success-color);
+    }
+
+    .error-message {
+      background-color: rgba(220, 53, 69, 0.1);
+      color: var(--error-color);
+      padding: 1rem;
+      border-radius: 6px;
+      margin-top: 1rem;
+      border-left: 4px solid var(--error-color);
     }
 
     /* Footer Styles */
@@ -482,32 +528,30 @@ require('contactpagedatabase.php');
         
         <div class="contact-form">
           <h2>Send us a Message</h2>
-          <form id="contactForm">
+          <form id="contactForm" method="POST" action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>">
             <div class="form-group">
               <label for="name">Your Name</label>
-              <input type="text" id="name" class="form-control" placeholder="Enter your name" required>
+              <input type="text" id="name" name="name" class="form-control" placeholder="Enter your name" required>
             </div>
             
             <div class="form-group">
               <label for="email">Email Address</label>
-              <input type="email" id="email" class="form-control" placeholder="Enter your email" required>
+              <input type="email" id="email" name="email" class="form-control" placeholder="Enter your email" required>
             </div>
             
             <div class="form-group">
               <label for="subject">Subject</label>
-              <input type="text" id="subject" class="form-control" placeholder="What is this regarding?">
+              <input type="text" id="subject" name="subject" class="form-control" placeholder="What is this regarding?">
             </div>
             
             <div class="form-group">
               <label for="message">Message</label>
-              <textarea id="message" class="form-control" placeholder="Type your message here" required></textarea>
+              <textarea id="message" name="message" class="form-control" placeholder="Type your message here" required></textarea>
             </div>
             
             <button type="submit" class="btn btn-block">Send Message</button>
             
-            <div class="success-message" id="successMessage">
-              Your message has been sent successfully! We'll get back to you soon.
-            </div>
+            <?php if (!empty($successMessage)) echo $successMessage; ?>
           </form>
         </div>
       </div>
@@ -552,23 +596,10 @@ require('contactpagedatabase.php');
     document.getElementById('menuToggle').addEventListener('click', function() {
       document.getElementById('navMenu').classList.toggle('active');
     });
-
-    // Form submission handling
-    document.getElementById('contactForm').addEventListener('submit', function(e) {
-      e.preventDefault();
-      // Here you would normally process the form data with AJAX
-      
-      // Show success message
-      document.getElementById('successMessage').style.display = 'block';
-      
-      // Reset form
-      this.reset();
-      
-      // Hide success message after 5 seconds
-      setTimeout(function() {
-        document.getElementById('successMessage').style.display = 'none';
-      }, 5000);
-    });
   </script>
 </body>
 </html>
+<?php
+// Close database connection
+$conn->close();
+?>
